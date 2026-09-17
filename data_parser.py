@@ -166,10 +166,10 @@ def parse_file(filepath: str, *, display_name: Optional[str] = None) -> FileData
             continue
 
         nums = _split_numeric_tokens(s)
-        if nums is not None and len(nums) >= 1:
+        if nums is not None and len(nums) >= 2:
             seeds.append({
                 "ver": nums[0],
-                "roots": nums[1:] if len(nums) > 1 else [],
+                "kor": nums[1], 
             })
             continue
 
@@ -193,44 +193,26 @@ def parse_file(filepath: str, *, display_name: Optional[str] = None) -> FileData
 def build_seed_dataframe(file_data: FileData, start_id: int = 1) -> pd.DataFrame:
     """Build a DataFrame for one file with all computed columns (report display).
 
-    Root lengths in kor01..korNN are sorted longest→shortest per seed for readability only;
-    sm.kor and mn.kor match the unsorted data because sum and mean are invariant.
-
-    Returns DataFrame with columns: id, zar, ver, kor01..korNN, sm.kor, mn.kor, rs.rat
+    Returns DataFrame with columns: id, zar, ver, kor, rs.rat
     Empty rows appended for failed seeds.
     """
-    max_roots = max((len(s["roots"]) for s in file_data.seeds), default=0)
-
     rows = []
     for i, seed in enumerate(file_data.seeds):
-        root_vals = sorted(int(r) for r in seed["roots"])
-        root_vals.reverse()
+        kor = int(seed["kor"])
         row = {
             "id": start_id + i,
             "zar": 0,
             "ver": seed["ver"],
+            "kor": kor,
         }
-        for j in range(max_roots):
-            col = f"kor{j + 1:02d}"
-            if j < len(root_vals):
-                row[col] = root_vals[j]
-            else:
-                row[col] = np.nan
-
-        row["sm.kor"] = sum(root_vals) if root_vals else 0
-        row["mn.kor"] = round(np.mean(root_vals)) if root_vals else 0
-        row["rs.rat"] = round(row["sm.kor"] / seed["ver"], 2) if seed["ver"] != 0 else np.nan
-
+        row["rs.rat"] = round(kor / seed["ver"], 2) if seed["ver"] not in (0, None) else np.nan
         rows.append(row)
 
     # Append empty rows for failed seeds
     next_id = start_id + len(file_data.seeds)
     for i in range(file_data.failed_count):
-        row = {"id": next_id + i}
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    return df
+        rows.append({"id": next_id + i})
+    return pd.DataFrame(rows)
 
 
 def discover_files(raw_dir: str) -> List[str]:
@@ -274,20 +256,15 @@ def build_analysis_dataframe(file_datas: List[FileData]) -> pd.DataFrame:
     rows = []
     for fd in file_datas:
         for seed in fd.seeds:
-            root_vals = seed["roots"]
-            sm_kor = sum(root_vals) if root_vals else 0
-            mn_kor = round(np.mean(root_vals)) if root_vals else 0
+            kor = int(seed["kor"])
             ver = seed["ver"]
-            rs_rat = round(sm_kor / ver, 2) if ver != 0 else np.nan
-
+            rs_rat = round(kor / ver, 2) if ver != 0 else np.nan
             rows.append({
                 "variant": fd.variant,
                 "replicate": fd.replicate,
                 "file_label": fd.label,
                 "ver": ver,
-                "sm.kor": sm_kor,
-                "mn.kor": mn_kor,
+                "kor": kor,
                 "rs.rat": rs_rat,
             })
-
     return pd.DataFrame(rows)

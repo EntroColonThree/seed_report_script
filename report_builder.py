@@ -124,7 +124,7 @@ def build_initial_data_table(pdf: ReportPDF, file_data: FileData, start_id: int 
     pdf.set_font(pdf._font_name, "", 7)
 
     kor_cols = [c for c in df.columns if c.startswith("kor")]
-    cols = ["id", "zar", "ver"] + kor_cols + ["sm.kor", "mn.kor", "rs.rat"]
+    cols = ["id", "zar", "ver"] + kor_cols + ["rs.rat"]
     headers = cols[:]
 
     col_widths = []
@@ -135,7 +135,7 @@ def build_initial_data_table(pdf: ReportPDF, file_data: FileData, start_id: int 
     for c in cols:
         if c in ("id", "zar"):
             col_widths.append(base_w * 0.7)
-        elif c in ("sm.kor", "mn.kor", "rs.rat"):
+        elif c == "rs.rat":
             col_widths.append(base_w * 1.2)
         else:
             col_widths.append(base_w)
@@ -171,7 +171,7 @@ def build_initial_data_table(pdf: ReportPDF, file_data: FileData, start_id: int 
                 text = str(int(val)) if pd.notna(val) else ""
             elif c == "rs.rat":
                 text = _format_val(val, 2)
-            elif c in ("sm.kor", "mn.kor", "ver"):
+            elif c == "ver":
                 text = str(int(val)) if pd.notna(val) else ""
             else:
                 text = str(int(val)) if pd.notna(val) else ""

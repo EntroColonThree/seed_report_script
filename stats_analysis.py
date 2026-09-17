@@ -25,12 +25,11 @@ except ImportError:
 NORMALITY_ALPHA = 0.05
 
 
-METRICS = ["ver", "sm.kor", "mn.kor", "rs.rat"]
+METRICS = ["ver", "kor", "rs.rat"]
 
 METRIC_TITLES = {
     "ver": "Длина колеоптилей",
-    "sm.kor": "Сумма длин корней",
-    "mn.kor": "Средняя длина корня",
+    "kor": "Длина корня",
     "rs.rat": "Отношение подземной/надземной частей растения",
 }
 

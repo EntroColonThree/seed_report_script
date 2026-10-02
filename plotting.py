@@ -68,28 +68,29 @@ def _shared_bin_edges(
     return np.linspace(lo, hi, n_bins + 1)
 
 
+MAX_PANELS_PER_FIGURE = 6  # 2 rows × 3 cols max per PDF page
+
+
+def _chunk_variants(variant_order: List[str], size: int = MAX_PANELS_PER_FIGURE) -> List[List[str]]:
+    """Split variant list into chunks of at most `size` for multi-page figures."""
+    return [variant_order[i:i + size] for i in range(0, len(variant_order), size)]
+
+
 def plot_histogram_per_variant(
     analysis_df: pd.DataFrame,
     metric: str,
     variant_order: List[str],
     output_path: str,
-) -> str:
+) -> List[str]:
     """Histogram per variant (pooled replicates) with shared bin edges and per-replicate rug.
 
-    Returns path to saved figure.
+    Splits variants into pages of at most 6 panels (2×3). When there are more
+    than 6 variants, produces `_p1`, `_p2`, … suffixed files.
+
+    Returns list of paths to saved figures.
     """
     _setup_style()
-    n_variants = len(variant_order)
-    n_cols = min(n_variants, 3)
-    n_rows = (n_variants + n_cols - 1) // n_cols
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
-    if n_variants == 1:
-        axes = np.array([axes])
-    axes = axes.flatten()
-
     title = METRIC_TITLES.get(metric, metric)
-    fig.suptitle(f"Распределение: {title}", fontsize=14, y=1.02)
 
     all_vals = (
         analysis_df.loc[analysis_df["variant"].isin(variant_order), metric]
@@ -97,49 +98,70 @@ def plot_histogram_per_variant(
         .to_numpy()
     )
     bin_edges = _shared_bin_edges(all_vals)
-
     rep_linestyles = ["-", "--", "-.", ":"]
 
-    for i, variant in enumerate(variant_order):
-        ax = axes[i]
-        sub = analysis_df.loc[analysis_df["variant"] == variant]
-        data = sub[metric].dropna()
-        if len(data) == 0:
-            ax.set_title(variant)
-            continue
+    chunks = _chunk_variants(variant_order)
+    multi_page = len(chunks) > 1
+    paths: List[str] = []
 
-        ax.hist(
-            data.to_numpy(), bins=bin_edges, density=True,
-            color="#b8b8b8", edgecolor="black", linewidth=0.6, alpha=0.55,
-            label=f"Все (N={len(data)})",
-        )
+    base, ext = os.path.splitext(output_path)
 
-        replicates = sorted(sub["replicate"].dropna().unique().tolist())
-        for r_idx, rep in enumerate(replicates):
-            rep_data = sub.loc[sub["replicate"] == rep, metric].dropna()
-            if len(rep_data) == 0:
+    for page_idx, chunk in enumerate(chunks, 1):
+        n_variants = len(chunk)
+        n_cols = min(n_variants, 3)
+        n_rows = (n_variants + n_cols - 1) // n_cols
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
+        if n_variants == 1:
+            axes = np.array([axes])
+        axes = axes.flatten()
+
+        suffix = f" (стр. {page_idx}/{len(chunks)})" if multi_page else ""
+        fig.suptitle(f"Распределение: {title}{suffix}", fontsize=14, y=1.02)
+
+        for i, variant in enumerate(chunk):
+            ax = axes[i]
+            sub = analysis_df.loc[analysis_df["variant"] == variant]
+            data = sub[metric].dropna()
+            if len(data) == 0:
+                ax.set_title(variant)
                 continue
+
             ax.hist(
-                rep_data.to_numpy(), bins=bin_edges, density=True,
-                histtype="step", color="black", linewidth=1.3,
-                linestyle=rep_linestyles[r_idx % len(rep_linestyles)],
-                label=f"п{rep} (N={len(rep_data)})",
+                data.to_numpy(), bins=bin_edges, density=True,
+                color="#b8b8b8", edgecolor="black", linewidth=0.6, alpha=0.55,
+                label=f"Все (N={len(data)})",
             )
 
-        ax.set_title(f"{variant}\nN = {len(data)}")
-        ax.set_xlabel(metric)
-        ax.set_ylabel("Плотность")
-        ax.set_xlim(left=max(0.0, float(bin_edges[0])))
-        ax.grid(False)
-        ax.legend(fontsize=7, loc="best", frameon=True)
+            replicates = sorted(sub["replicate"].dropna().unique().tolist())
+            for r_idx, rep in enumerate(replicates):
+                rep_data = sub.loc[sub["replicate"] == rep, metric].dropna()
+                if len(rep_data) == 0:
+                    continue
+                ax.hist(
+                    rep_data.to_numpy(), bins=bin_edges, density=True,
+                    histtype="step", color="black", linewidth=1.3,
+                    linestyle=rep_linestyles[r_idx % len(rep_linestyles)],
+                    label=f"п{rep} (N={len(rep_data)})",
+                )
 
-    for i in range(n_variants, len(axes)):
-        axes[i].set_visible(False)
+            ax.set_title(f"{variant}\nN = {len(data)}")
+            ax.set_xlabel(metric)
+            ax.set_ylabel("Плотность")
+            ax.set_xlim(left=max(0.0, float(bin_edges[0])))
+            ax.grid(False)
+            ax.legend(fontsize=7, loc="best", frameon=True)
 
-    plt.tight_layout()
-    fig.savefig(output_path, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
+        for i in range(n_variants, len(axes)):
+            axes[i].set_visible(False)
+
+        plt.tight_layout()
+        page_path = f"{base}_p{page_idx}{ext}" if multi_page else output_path
+        fig.savefig(page_path, bbox_inches="tight")
+        plt.close(fig)
+        paths.append(page_path)
+
+    return paths
 
 
 def plot_kde_per_variant(
@@ -147,73 +169,86 @@ def plot_kde_per_variant(
     metric: str,
     variant_order: List[str],
     output_path: str,
-) -> str:
+) -> List[str]:
     """KDE per variant (pooled replicates) with per-replicate overlays.
 
+    Splits variants into pages of at most 6 panels (2×3). When there are more
+    than 6 variants, produces `_p1`, `_p2`, … suffixed files.
+
     Density is clipped to [0, +inf) since the metrics are physical lengths.
-    Returns path to saved figure.
+    Returns list of paths to saved figures.
     """
     _setup_style()
-    n_variants = len(variant_order)
-    n_cols = min(n_variants, 3)
-    n_rows = (n_variants + n_cols - 1) // n_cols
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
-    if n_variants == 1:
-        axes = np.array([axes])
-    axes = axes.flatten()
-
     title = METRIC_TITLES.get(metric, metric)
-    fig.suptitle(f"Распределение (KDE): {title}", fontsize=14, y=1.02)
-
     rep_linestyles = ["-", "--", "-.", ":"]
 
-    for i, variant in enumerate(variant_order):
-        ax = axes[i]
-        sub = analysis_df.loc[analysis_df["variant"] == variant]
-        data = sub[metric].dropna()
-        if len(data) == 0:
-            ax.set_title(variant)
-            continue
+    chunks = _chunk_variants(variant_order)
+    multi_page = len(chunks) > 1
+    paths: List[str] = []
 
-        replicates = sorted(sub["replicate"].dropna().unique().tolist())
-        for r_idx, rep in enumerate(replicates):
-            rep_data = sub.loc[sub["replicate"] == rep, metric].dropna()
-            if len(rep_data) < 2 or rep_data.nunique() < 2:
+    base, ext = os.path.splitext(output_path)
+
+    for page_idx, chunk in enumerate(chunks, 1):
+        n_variants = len(chunk)
+        n_cols = min(n_variants, 3)
+        n_rows = (n_variants + n_cols - 1) // n_cols
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
+        if n_variants == 1:
+            axes = np.array([axes])
+        axes = axes.flatten()
+
+        suffix = f" (стр. {page_idx}/{len(chunks)})" if multi_page else ""
+        fig.suptitle(f"Распределение (KDE): {title}{suffix}", fontsize=14, y=1.02)
+
+        for i, variant in enumerate(chunk):
+            ax = axes[i]
+            sub = analysis_df.loc[analysis_df["variant"] == variant]
+            data = sub[metric].dropna()
+            if len(data) == 0:
+                ax.set_title(variant)
                 continue
-            try:
-                ls = rep_linestyles[r_idx % len(rep_linestyles)]
+
+            replicates = sorted(sub["replicate"].dropna().unique().tolist())
+            for r_idx, rep in enumerate(replicates):
+                rep_data = sub.loc[sub["replicate"] == rep, metric].dropna()
+                if len(rep_data) < 2 or rep_data.nunique() < 2:
+                    continue
+                try:
+                    ls = rep_linestyles[r_idx % len(rep_linestyles)]
+                    sns.kdeplot(
+                        data=rep_data, ax=ax, fill=False,
+                        clip=(0, None),
+                        linewidth=1.1, color="black", linestyle=ls,
+                        label=f"п{rep} (N={len(rep_data)})",
+                    )
+                except Exception:
+                    pass
+
+            if len(data) >= 2 and data.nunique() >= 2:
                 sns.kdeplot(
-                    data=rep_data, ax=ax, fill=False,
+                    data=data, ax=ax, fill=True, alpha=0.22,
                     clip=(0, None),
-                    linewidth=1.1, color="black", linestyle=ls,
-                    label=f"п{rep} (N={len(rep_data)})",
+                    linewidth=2.2, color="black",
+                    label=f"Все (N={len(data)})",
                 )
-            except Exception:
-                pass
 
-        if len(data) >= 2 and data.nunique() >= 2:
-            sns.kdeplot(
-                data=data, ax=ax, fill=True, alpha=0.22,
-                clip=(0, None),
-                linewidth=2.2, color="black",
-                label=f"Все (N={len(data)})",
-            )
+            ax.set_title(f"{variant}\nN = {len(data)}")
+            ax.set_xlabel(metric)
+            ax.set_ylabel("Плотность")
+            ax.set_xlim(left=0.0)
+            ax.legend(fontsize=7, loc="best", frameon=True)
 
-        ax.set_title(f"{variant}\nN = {len(data)}")
-        ax.set_xlabel(metric)
-        ax.set_ylabel("Плотность")
-        ax.set_xlim(left=0.0)
-        ax.legend(fontsize=7, loc="best", frameon=True)
+        for i in range(n_variants, len(axes)):
+            axes[i].set_visible(False)
 
-    for i in range(n_variants, len(axes)):
-        axes[i].set_visible(False)
+        plt.tight_layout()
+        page_path = f"{base}_p{page_idx}{ext}" if multi_page else output_path
+        fig.savefig(page_path, bbox_inches="tight")
+        plt.close(fig)
+        paths.append(page_path)
 
-    plt.tight_layout()
-    fig.savefig(output_path, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
-
+    return paths
 
 def plot_boxplots_per_variant(
     analysis_df: pd.DataFrame,
@@ -345,7 +380,7 @@ def generate_all_plots(
     output_dir: str,
     metrics: Optional[List[str]] = None,
     cld_by_metric: Optional[Dict[str, Dict[str, str]]] = None,
-) -> Dict[str, Dict[str, str]]:
+) -> Dict[str, Dict[str, object]]:
     """Generate all plots for all metrics.
 
     Returns nested dict: metric -> plot_type -> filepath.
@@ -356,11 +391,11 @@ def generate_all_plots(
         from stats_analysis import METRICS
         metrics = METRICS
 
-    all_paths: Dict[str, Dict[str, str]] = {}
+    all_paths: Dict[str, Dict[str, object]] = {}
 
     for metric in metrics:
         safe_name = metric.replace(".", "_")
-        paths = {}
+        paths: Dict[str, object] = {}
 
         paths["hist"] = plot_histogram_per_variant(
             analysis_df, metric, variant_order,

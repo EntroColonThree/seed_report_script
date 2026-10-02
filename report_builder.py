@@ -472,17 +472,17 @@ def build_metric_section(
     # Distribution plots
     pdf.section_title(f"{section_num}.1 Форма и характер распределения данных", level=2)
 
-    if "hist" in plot_paths:
-        pdf.add_image_full_width(
-            plot_paths["hist"],
-            f"Рис.: Гистограммы распределения — {title}",
-        )
+    def _emit_pages(key: str, caption: str):
+        """Emit one or several figure pages for a plot key (list- or str-valued)."""
+        value = plot_paths.get(key)
+        if not value:
+            return
+        items = value if isinstance(value, list) else [value]
+        for path in items:
+            pdf.add_image_full_width(path, caption)
 
-    if "kde" in plot_paths:
-        pdf.add_image_full_width(
-            plot_paths["kde"],
-            f"Рис.: Кривые плотности (KDE) — {title}",
-        )
+    _emit_pages("hist", f"Рис.: Гистограммы распределения — {title}")
+    _emit_pages("kde", f"Рис.: Кривые плотности (KDE) — {title}")
 
     if "boxplot_replicate" in plot_paths:
         pdf.add_image_full_width(
